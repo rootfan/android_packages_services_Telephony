@@ -7270,37 +7270,54 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
         }
     }
 
+    private int oemRilReturnValue = 0;
     @Override
     @Deprecated
     public int invokeOemRilRequestRaw(byte[] oemReq, byte[] oemResp) {
         enforceModifyPermission();
 
-        int returnValue = 0;
-        try {
-            AsyncResult result = (AsyncResult) sendRequest(CMD_INVOKE_OEM_RIL_REQUEST_RAW, oemReq);
-            if(result.exception == null) {
-                if (result.result != null) {
-                    byte[] responseData = (byte[])(result.result);
-                    if(responseData.length > oemResp.length) {
-                        Log.w(LOG_TAG, "Buffer to copy response too small: Response length is " +
-                                responseData.length +  "bytes. Buffer Size is " +
-                                oemResp.length + "bytes.");
-                    }
-                    System.arraycopy(responseData, 0, oemResp, 0, responseData.length);
-                    returnValue = responseData.length;
-                }
-            } else {
-                CommandException ex = (CommandException) result.exception;
-                returnValue = ex.getCommandError().ordinal();
-                if(returnValue > 0) returnValue *= -1;
-            }
-        } catch (RuntimeException e) {
-            Log.w(LOG_TAG, "sendOemRilRequestRaw: Runtime Exception");
-            returnValue = (CommandException.Error.GENERIC_FAILURE.ordinal());
-            if(returnValue > 0) returnValue *= -1;
-        }
+        Thread rilRequestThread = new Thread() {
+	public void run(){
+        Looper.prepare();
+         Handler mHandler = new Handler(Looper.myLooper()) {
+             public void handleMessage(Message msg) {
 
-        return returnValue;
+
+                try {
+                    AsyncResult result = (AsyncResult) msg.obj;
+                    if(result.exception == null) {
+                        if (result.result != null) {
+                            byte[] responseData = (byte[])(result.result);
+                            if(responseData.length > oemResp.length) {
+                                Log.w(LOG_TAG, "Buffer to copy response too small: Response length is " +
+                                        responseData.length +  "bytes. Buffer Size is " +
+                                        oemResp.length + "bytes.");
+                            }
+                            System.arraycopy(responseData, 0, oemResp, 0, responseData.length);
+                            oemRilReturnValue = responseData.length;
+                        }
+                    } else {
+                        CommandException ex = (CommandException) result.exception;
+                        oemRilReturnValue = ex.getCommandError().ordinal();
+                        if(oemRilReturnValue > 0) oemRilReturnValue *= -1;
+                    }
+                } catch (RuntimeException e) {
+                    Log.w(LOG_TAG, "sendOemRilRequestRaw: Runtime Exception");
+                    oemRilReturnValue = (CommandException.Error.GENERIC_FAILURE.ordinal());
+                    if(oemRilReturnValue > 0) oemRilReturnValue *= -1;
+                }
+		Looper.myLooper().quit();
+
+             }
+          };
+       Message deliverMessage = Message.obtain(mHandler);
+       (PhoneFactory.getDefaultPhone()).invokeOemRilRequestRaw(oemReq, deliverMessage);
+       Looper.loop();
+       }
+       };
+        rilRequestThread.start();
+        try {rilRequestThread.join();} catch (InterruptedException e) {Log.e(LOG_TAG,"oem hook thread join was interrupted!");}
+        return oemRilReturnValue;
     }
 
     @Override
